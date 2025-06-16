@@ -4,7 +4,7 @@ using System.Windows.Media;
 
 namespace MineSweeper
 {
-    partial class Tile : Button
+    class Tile : Button
     {
         public int Value { get; set; }
         public int X { get; set; }
@@ -15,55 +15,96 @@ namespace MineSweeper
     public partial class MineSweeperBoard : Window
     {
         private Tile[][] _tiles;
-        public Grid Board { get; set; }
+        private Grid _board;
+        private int _mines;
+        private int _sweeps;
+        private int _flags;
+        private int _rows;
+        private int _cols;
 
         public MineSweeperBoard()
         {
             InitializeComponent();
-            Board = new Grid();
+            _board = new Grid();
 
-            int rows = 8;
-            int cols = 8;
-            for (int i = 0; i < rows; i++)
-                Board.RowDefinitions.Add(new RowDefinition());
+            _rows = 8;
+            _cols = 8;
+            for (int i = 0; i < _rows; i++)
+                _board.RowDefinitions.Add(new RowDefinition());
 
-            for (int j = 0; j < cols; j++)
-                Board.ColumnDefinitions.Add(new ColumnDefinition());
+            for (int j = 0; j < _cols; j++)
+                _board.ColumnDefinitions.Add(new ColumnDefinition());
 
-            CreateBoard(rows, cols, 7);
+            _mines = 7;
 
-            Content = Board;
+            CreateBoard();
+
+            Content = _board;
         }
 
         private void Sweep(Tile t)
         {
             if (t.Swept) return;
-            t.Content = t.Value.ToString();
             t.Background = Brushes.LightGray;
-            t.Swept = true;
-            if (t.Value == 0)
+            t.Content = t.Value switch
             {
-                ForEachNeighbour(t.X, t.Y, n =>
-                {
-                    Sweep(n);
-                });
+                -1 => "m",
+                0 => "",
+                _ => t.Value.ToString()
+            };
+            if (t.Value == -1)
+            {
+                t.Background = Brushes.Red;
             }
+            t.Swept = true;
+            _sweeps++;
+            if (t.Value == -1)
+            {
+                GameOver("You lose!");
+                return;
+            }
+            else if (t.Value == 0)
+            {
+                ForEachNeighbour(t.X, t.Y, Sweep);
+            }
+            if (_sweeps >= _rows * _cols - _mines)
+            {
+                GameOver("You win!");
+                CreateBoard();
+            }
+        }
+
+        private void GameOver(string message)
+        {
+            for (int i = 0; i < _rows; i++)
+            {
+                for (int j = 0; j < _cols; j++)
+                {
+                    if (_tiles[i][j].Value == -1)
+                    {
+                        _tiles[i][j].Foreground = Brushes.Black;
+                        _tiles[i][j].Content = "m";
+                    }
+                }
+            }
+            MessageBox.Show(message, "Alert", MessageBoxButton.OK, MessageBoxImage.Information);
+            _sweeps = 0;
+            _flags = 0;
+            CreateBoard();
         }
 
         private void Click(object sender, RoutedEventArgs e)
         {
-            Tile t = (Tile)sender;
-
-            Sweep(t);
+            Sweep((Tile)sender);
         }
 
-        public void CreateBoard(int n, int m, int mines)
+        public void CreateBoard()
         {
-            _tiles = new Tile[n][];
-            for (int i = 0; i < n; i++)
+            _tiles = new Tile[_rows][];
+            for (int i = 0; i < _rows; i++)
             {
-                _tiles[i] = new Tile[m];
-                for (int j = 0; j < m; j++)
+                _tiles[i] = new Tile[_cols];
+                for (int j = 0; j < _cols; j++)
                 {
                     Tile button = new Tile
                     {
@@ -75,54 +116,67 @@ namespace MineSweeper
                         Swept = false
                     };
 
-                    button.Click += Click;
+                    button.Click += (sender, e) => Sweep((Tile)sender);
+                    button.MouseRightButtonDown += (sender, e) =>
+                    {
+                        Tile t = (Tile)sender;
+                        if (!t.Swept)
+                        {
+                            if (t.Content?.ToString() == "f")
+                            {
+                                t.Foreground = Brushes.Black;
+                                t.Content = "";
+                                _flags--;
+                            }
+                            else if (_flags < _mines)
+                            {
+                                t.Foreground =Brushes.Red;
+                                t.Content = "f";
+                                _flags++;
+                            }
+                        }    
+                    };
 
                     Grid.SetRow(button, i);
                     Grid.SetColumn(button, j);
-                    Board.Children.Add(button);
+                    _board.Children.Add(button);
                     _tiles[i][j] = button;
-
                 }
             }
-            SetupBoard(mines);
+            SetupBoard();
         }
 
-        private void SetupBoard(int mines)
+        private void SetupBoard()
         {
             Random rand = new Random();
-            for (int i = 0; i < mines;)
+            for (int i = 0; i < _mines;)
             {
                 (int x, int y) = (rand.Next(_tiles.Length), rand.Next(_tiles[0].Length));
                 if (_tiles[x][y].Value == -1)
                 {
                     continue;
                 }
-                SetupMine(x, y);
+                _tiles[x][y].Value = -1;
+                ForEachNeighbour(x, y, n =>
+                {
+                    if (n.Value != -1)
+                    {
+                        n.Value++;
+                    }
+                });
                 i++;
             }
         }
 
-        private void SetupMine(int x, int y)
-        {
-            _tiles[x][y].Value = -1;
-            ForEachNeighbour(x, y, n =>
-            {
-                if (n.Value != -1)
-                {
-                    n.Value++;
-                }
-            });
-        }
-
-        private void ForEachNeighbour(int x, int y, Action<Tile> func)
+        private void ForEachNeighbour(int x, int y, Action<Tile> act)
         {
             for (int i = x - 1; i <= x + 1; i++)
             {
-                if (i < 0 || i >= _tiles.Length) continue;
+                if (i < 0 || i >= _rows) continue;
                 for (int j = y - 1; j <= y + 1; j++)
                 {
-                    if (j < 0 || j >= _tiles[i].Length) continue;
-                    func(_tiles[i][j]);
+                    if (j < 0 || j >= _cols) continue;
+                    act(_tiles[i][j]);
                 }
             }
         }
