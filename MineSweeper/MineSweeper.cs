@@ -15,27 +15,34 @@ namespace MineSweeper
     public partial class MineSweeperBoard : Window
     {
         private Tile[][] _tiles;
-        private Grid _board;
+        private Grid _board = new Grid();
         private int _mines;
         private int _sweeps;
         private int _flags;
         private int _rows;
         private int _cols;
+        private TextBox _timer;
+        private CancellationTokenSource _cancellation;
 
         public MineSweeperBoard()
         {
             InitializeComponent();
-            _board = new Grid();
+            _board.RowDefinitions.Add(new RowDefinition());
+            _timer = new TextBox();
+            _timer.FontSize += 10;
 
             _rows = 8;
             _cols = 8;
+            _mines = 7;
             for (int i = 0; i < _rows; i++)
                 _board.RowDefinitions.Add(new RowDefinition());
 
             for (int j = 0; j < _cols; j++)
                 _board.ColumnDefinitions.Add(new ColumnDefinition());
-
-            _mines = 7;
+            
+            Grid.SetRow(_timer, 0);
+            Grid.SetColumn(_timer, 0);
+            _board.Children.Add(_timer);
 
             CreateBoard();
 
@@ -44,7 +51,7 @@ namespace MineSweeper
 
         private void Sweep(Tile t)
         {
-            if (t.Swept) return;
+            if (t.Swept || t.Content?.ToString() == "f") return;
             t.Background = Brushes.LightGray;
             t.Content = t.Value switch
             {
@@ -93,14 +100,17 @@ namespace MineSweeper
             CreateBoard();
         }
 
-        private void Click(object sender, RoutedEventArgs e)
-        {
-            Sweep((Tile)sender);
-        }
-
         public void CreateBoard()
         {
+            _timer.Text = "0";
+            _cancellation?.Cancel();
             _tiles = new Tile[_rows][];
+            TextBox mines = new TextBox();
+            mines.FontSize += 10;
+            mines.Text = (_mines - _flags).ToString();
+            Grid.SetRow(mines, 0);
+            Grid.SetColumn(mines, _cols - 1);
+            _board.Children.Add(mines);
             for (int i = 0; i < _rows; i++)
             {
                 _tiles[i] = new Tile[_cols];
@@ -130,20 +140,39 @@ namespace MineSweeper
                             }
                             else if (_flags < _mines)
                             {
-                                t.Foreground =Brushes.Red;
+                                t.Foreground = Brushes.Red;
                                 t.Content = "f";
                                 _flags++;
                             }
-                        }    
+                            mines.Text = (_mines - _flags).ToString();
+                        }
+                        else
+                        {
+                            ForEachNeighbour(t.X, t.Y, Sweep, _cancellation.Token);
+                        }
                     };
 
-                    Grid.SetRow(button, i);
+                    Grid.SetRow(button, i + 1);
                     Grid.SetColumn(button, j);
                     _board.Children.Add(button);
                     _tiles[i][j] = button;
                 }
             }
             SetupBoard();
+            _cancellation = new CancellationTokenSource();
+            CancellationToken token = _cancellation.Token;
+            Task.Run(() =>
+            {
+                while (!token.IsCancellationRequested)
+                {
+                    Thread.Sleep(1000);
+                    this.Dispatcher.Invoke(() =>
+                    {
+                        _timer.Text = (int.Parse(_timer.Text) + 1).ToString();
+                    });
+                    
+                }
+            }, token);
         }
 
         private void SetupBoard()
@@ -168,14 +197,16 @@ namespace MineSweeper
             }
         }
 
-        private void ForEachNeighbour(int x, int y, Action<Tile> act)
+        private void ForEachNeighbour(int x, int y, Action<Tile> act, CancellationToken? token = null)
         {
             for (int i = x - 1; i <= x + 1; i++)
             {
                 if (i < 0 || i >= _rows) continue;
+                if (token != null && ((CancellationToken)token).IsCancellationRequested) break;
                 for (int j = y - 1; j <= y + 1; j++)
                 {
                     if (j < 0 || j >= _cols) continue;
+                    if (token != null && ((CancellationToken)token).IsCancellationRequested) break;
                     act(_tiles[i][j]);
                 }
             }
